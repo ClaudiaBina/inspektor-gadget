@@ -166,6 +166,9 @@ func (c *DockerClient) GetContainerDetails(containerID string) (*runtimeclient.C
 					ContainerID:   containerJSON.ID,
 					ContainerName: strings.TrimPrefix(containerJSON.Name, "/"),
 					RuntimeName:   types.RuntimeNameDocker,
+					// We do not get ContainerImageName here because `containerJSON.Image` provides
+					// the image ID e.g.
+					/// containerJSON.Image: sha256:01c0ce65fff70ab1f019aa14679c46b23331bd108ae899438e589673efaa9c00
 				},
 				State: containerStatusStateToRuntimeClientState(containerJSON.State.Status),
 			},
@@ -236,12 +239,32 @@ func containerStatusStateToRuntimeClientState(containerState string) (runtimeCli
 }
 
 func DockerContainerToContainerData(container *dockertypes.Container) *runtimeclient.ContainerData {
+	image := container.Image
+	imageName := ""
+	// Image filed provided by Docker API may looks like e.g.
+	// 1. gcr.io/k8s-minikube/kicbase:v0.0.37@sha256:8bf7a0e8a062bc5e2b71d28b35bfa9cc862d9220e234e86176b3785f685d8b15
+	// OR
+	// 2. busybox@sha256:3fbc632167424a6d997e74f52b878d7cc478225cffac6bc977eedfe51c7f4e79
+	// These two provide both image name and digest separated by '@'.
+	//
+	// 3. sha256:aebe758cef4cd05b9f8cee39758227714d02f42ef3088023c1e3cd454f927a2b
+	// This third option provides the imageID and it's not what we are looking for.
+	//
+	// So if the image string does not contain a '@' character, then we'll have an empty ContainerImageName as it
+	// is not provided by the Docker API.
+	if strings.Contains(image, "@") {
+		imageName = strings.Split(image, "@")[0]
+	} else {
+		log.Debugf("image name not provided by Docker API for container %+v", container.ID)
+	}
+
 	containerData := &runtimeclient.ContainerData{
 		Runtime: runtimeclient.RuntimeContainerData{
 			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-				ContainerID:   container.ID,
-				ContainerName: strings.TrimPrefix(container.Names[0], "/"),
-				RuntimeName:   types.RuntimeNameDocker,
+				ContainerID:        container.ID,
+				ContainerName:      strings.TrimPrefix(container.Names[0], "/"),
+				RuntimeName:        types.RuntimeNameDocker,
+				ContainerImageName: imageName,
 			},
 			State: containerStatusStateToRuntimeClientState(container.State),
 		},
